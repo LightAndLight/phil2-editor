@@ -6,9 +6,9 @@ mkDerivation {
   pname = "bricki-reflex";
   version = "0.1.0.0";
   src = fetchgit {
-    url = "https://github.com/lspitzner/bricki-reflex";
-    sha256 = "0qi2k14w41lqxbx9j05j7ivlllc7mqxkv3769dl5ws8d0svi6g7v";
-    rev = "b97ccef05f10bfbdac5ff56e1167af9ef62c99b1";
+    url = "https://github.com/lightandlight/bricki-reflex";
+    sha256 = "0pcbp64mspxg6k1bwr8p82g805dzlh8w92f3pnfdbm2sygv9m3si";
+    rev = "1a6705c9f93f3b15052b8b27c8901dfbc71e0919";
   };
   isLibrary = true;
   isExecutable = true;
