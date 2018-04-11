@@ -7,8 +7,8 @@ mkDerivation {
   version = "0.1.0.0";
   src = fetchgit {
     url = "https://github.com/lightandlight/bricki-reflex";
-    sha256 = "0pcbp64mspxg6k1bwr8p82g805dzlh8w92f3pnfdbm2sygv9m3si";
-    rev = "1a6705c9f93f3b15052b8b27c8901dfbc71e0919";
+    sha256 = "1d2kqkka2jv1mq1hz713ws4p78iiwjr6jbgkbwj7vy7s8s6rhb2c";
+    rev = "605f14a4e70261d5045c6e7cc8784e6d14170e4f";
   };
   isLibrary = true;
   isExecutable = true;
