@@ -145,9 +145,10 @@ main = do
         let
           eBrickEvent = fmapMaybe id eInput
           eDoShutdown = ffilter quitEvent eBrickEvent $> ()
-          dCursor = pure $ const Nothing
+          dCursor = pure $ Just . head
           dAttrMap = pure $ Brick.attrMap Vty.defAttr []
 
+        dCursorLoc <- holdDyn (Brick.Location (0, 0)) _
         dAst <-
           holdDyn
             (zipTokenTree $ definitionsTokens ast)
@@ -155,7 +156,7 @@ main = do
                (\tree event -> asum $ (\(f, g) -> [ e | e <- g tree, f event]) <$> keybindings)
                (current dAst)
                eBrickEvent)
-        dWidgets <- makeUI dAst
+        dWidgets <- makeUI dCursorLoc dAst
 
         (eInput, eWasShutdown, _) <- brickWrapper eDoShutdown dWidgets dCursor dAttrMap
 
@@ -164,20 +165,22 @@ main = do
 
 makeUI
   :: (Reflex t, MonadHold t m)
-  => Dynamic t TokenTreeZ
+  => Dynamic t Brick.Location
+  -> Dynamic t TokenTreeZ
   -> m (Dynamic t [Widget String])
-makeUI dAst =
+makeUI dCursorLoc dAst =
   pure $
   sequence
-    [ astDisplay <$> dAst
+    [ astDisplay <$> dCursorLoc <*> dAst
     ]
   where
-    astDisplay =
+    astDisplay loc ast =
       Widget.hCenter .
       Widget.border .
       Brick.hLimit 80 .
       Brick.viewport "testing" Brick.Vertical .
-      renderTokenTreeZ
+      Brick.showCursor "cursor" loc $
+      renderTokenTreeZ ast
 
 quitEvent :: Vty.Event -> Bool
 quitEvent (Vty.EvKey (Vty.KChar 'q') mods) = Vty.MCtrl `elem` mods
