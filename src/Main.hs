@@ -124,6 +124,9 @@ keybindings =
   , (shiftTabEvent, prevEditable)
   , (wEvent, nextLeaf)
   , (bEvent, prevLeaf)
+  , (kEvent, upAdjacent)
+  , (jEvent, downAdjacent)
+  , (nEvent, fmap fst . closestNewlineRight)
   ]
   where
     tabEvent (Vty.EvKey (Vty.KChar '\t') []) = True
@@ -132,7 +135,15 @@ keybindings =
     wEvent (Vty.EvKey (Vty.KChar 'w') []) = True
     wEvent _ = False
 
-    bEvent :: Vty.Event -> Bool
+    kEvent (Vty.EvKey (Vty.KChar 'k') []) = True
+    kEvent _ = False
+
+    jEvent (Vty.EvKey (Vty.KChar 'j') []) = True
+    jEvent _ = False
+
+    nEvent (Vty.EvKey (Vty.KChar 'n') []) = True
+    nEvent _ = False
+
     bEvent (Vty.EvKey (Vty.KChar 'b') []) = True
     bEvent _ = False
 
