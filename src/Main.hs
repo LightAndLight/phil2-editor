@@ -6,14 +6,9 @@ module Main where
 import Brick (Widget)
 import Brick.ReflexMain (brickWrapper)
 import Control.Applicative ((<|>))
-import Control.Monad ((<=<))
-import Data.Functor (($>))
-import Data.List.NonEmpty (NonEmpty(..))
-import Data.Maybe (fromMaybe)
-import Data.Semigroup(Semigroup, (<>))
 import Reflex
-  ((<@), Reflex, MonadHold, Event, Behavior, Dynamic, runSpiderHost,
-   fmapMaybe, never)
+  (Reflex, MonadHold, Dynamic, runSpiderHost,
+   fmapMaybe, attachWithMaybe, current)
 import Reflex.Dynamic (holdDyn)
 import Reflex.Host.App (hostApp, performPostBuild_, infoQuit)
 import System.Environment (getArgs)
@@ -23,107 +18,10 @@ import qualified Brick.Widgets.Border as Widget
 import qualified Brick.Widgets.Center as Widget
 import qualified Graphics.Vty as Vty
 
-import Phil.Core (Expr(..), Type)
-import Phil.Parser (Span, parseExpr)
-import Phil.Printer (printExpr, printType)
+import Phil.Core (Expr(..))
+import Phil.Parser (parseExpr)
 
-data Interval
-  = Interval
-  { line :: !Int
-  , colStart :: !Int
-  , offset :: !Int
-  }
-  deriving (Eq, Show)
-
-data TokenTree
-  = Tree !String !Int (NonEmpty TokenTree)
-  | Leaf !Bool Token
-  deriving (Eq, Show, Ord)
-data Token = Token !String !Int deriving (Eq, Show, Ord)
-instance Semigroup Token where
-  Token a b <> Token c d = Token (a <> c) (b + d)
-
-toToken :: TokenTree -> Token
-toToken (Leaf _ t) = t
-toToken (Tree s off _) = Token s off
-
-tokenTree :: NonEmpty TokenTree -> TokenTree
-tokenTree ts =
-  let
-    Token s off = foldr1 (<>) $ fmap toToken ts
-  in
-    Tree s off ts
-
-token :: String -> Token
-token str = Token str $ length str
-
-data TokenHistory
-  = WentDown [TokenTree]
-  | WentRight TokenTree
-  deriving (Eq, Show, Ord)
-
-data TokenTreeZ
-  = TokenTreeZ
-  { history :: [TokenHistory]
-  , focus :: TokenTree
-  , rights :: [TokenTree]
-  } deriving (Eq, Show)
-
-zipTokenTree :: TokenTree -> TokenTreeZ
-zipTokenTree t = TokenTreeZ [] t []
-
-untilNothing :: (a -> Maybe a) -> a -> a
-untilNothing f a = maybe a (untilNothing f) (f a)
-
-untilJust :: (a -> Maybe a) -> (a -> Maybe a) -> a -> Maybe a
-untilJust f g a = f a >>= (\b -> g b <|> untilJust f g b)
-
-down :: TokenTreeZ -> Maybe TokenTreeZ
-down (TokenTreeZ hist cur rs) =
-  case cur of
-    Leaf{} -> Nothing
-    Tree _ _ (tt :| tts) -> Just $ TokenTreeZ (WentDown rs : hist) tt tts
-
-up :: TokenTreeZ -> Maybe TokenTreeZ
-up ttz =
-  case untilNothing left ttz of
-    TokenTreeZ (WentDown tts : hist) cur rs ->
-      Just $ TokenTreeZ hist (tokenTree $ cur :| rs) tts
-    _ -> Nothing
-
-left :: TokenTreeZ -> Maybe TokenTreeZ
-left (TokenTreeZ (WentRight tt : hist) cur rs) =
-  Just $ TokenTreeZ hist tt (cur:rs)
-left _ = Nothing
-
-right :: TokenTreeZ -> Maybe TokenTreeZ
-right (TokenTreeZ hist cur rs) =
-  case rs of
-    [] -> Nothing
-    rr:rrs -> Just $ TokenTreeZ (WentRight cur : hist) rr rrs
-
-nextToken :: TokenTreeZ -> Maybe TokenTreeZ
-nextToken tz =
-  down tz $> untilNothing down tz <|>
-  right tz <|>
-  untilJust up right tz
-
-prevToken :: TokenTreeZ -> Maybe TokenTreeZ
-prevToken tz = left tz <|> up tz
-
-nextEditable :: TokenTreeZ -> Maybe TokenTreeZ
-nextEditable tz = do
-  tz' <- nextToken tz
-  case focus tz' of
-    Leaf False _ -> nextEditable tz'
-    _ -> Just tz'
-
-prevEditable :: TokenTreeZ -> Maybe TokenTreeZ
-prevEditable tz = do
-  tz' <- prevToken tz
-  case focus tz' of
-    Leaf False _ -> prevEditable tz'
-    _ -> Just tz'
+import TokenTree
 
 exprTokens :: (ty String -> TokenTree) -> Expr ty a -> TokenTree
 exprTokens tyTokens e =
@@ -182,56 +80,61 @@ main = do
           dCursor = pure $ const Nothing
           dAttrMap = pure $ Brick.attrMap Vty.defAttr []
 
-        dAst <- holdDyn ast $ fmapMaybe (updateEvent =<<) eInput $> ast
-        dHighlighted <- holdDyn (Interval 1 50 10) (eInput $> Interval 1 50 10)
-        dWidgets <- makeUI dAst dHighlighted
+        dAst <-
+          holdDyn
+            (zipTokenTree $ exprTokens undefined ast)
+            (attachWithMaybe
+               (\a b ->
+                  (b >>= tabEvent) *> nextEditable a <|>
+                  (b >>= shiftTabEvent) *> prevEditable a <|>
+                  (b >>= wEvent) *> nextLeaf a <|>
+                  (b >>= bEvent) *> prevLeaf a
+               )
+               (current dAst)
+               eInput)
+        dWidgets <- makeUI dAst
 
-        (eInput, eWasShutdown, suspend) <- brickWrapper eDoShutdown dWidgets dCursor dAttrMap
+        (eInput, eWasShutdown, _) <- brickWrapper eDoShutdown dWidgets dCursor dAttrMap
 
         performPostBuild_ . pure . infoQuit $ pure eWasShutdown
         pure ()
 
 makeUI
   :: (Reflex t, MonadHold t m)
-  => Dynamic t (Expr (Type Span) Span)
-  -> Dynamic t Interval
+  => Dynamic t TokenTreeZ
   -> m (Dynamic t [Widget String])
-makeUI dAst dHighlighted =
+makeUI dAst =
   pure $
   sequence
-    [ fullDisplay <$> dAst <*> dHighlighted
+    [ astDisplay <$> dAst
     ]
   where
-    fullDisplay ast interval =
-      let
-        astD = astDisplay ast
-        intervalD = intervalDisplay interval
-      in
-        Brick.Widget (Brick.hSize astD) (Brick.vSize astD) $ do
-          Brick.render intervalD
-          Brick.render astD
-
     astDisplay =
       Widget.hCenter .
       Widget.border .
       Brick.hLimit 80 .
       Brick.viewport "testing" Brick.Vertical .
-      Brick.visible .
-      Brick.str .
-      printExpr (printType id)
-
-    intervalDisplay (Interval line col offset) =
-      Brick.translateBy (Brick.Location (col, line)) $
-      Brick.raw
-        (Vty.charFill
-          (Vty.defAttr `Vty.withBackColor` Vty.cyan)
-          ' '
-          offset
-          1)
+      renderTokenTreeZ
 
 quitEvent :: Vty.Event -> Maybe ()
 quitEvent (Vty.EvKey (Vty.KChar 'q') mods) | Vty.MCtrl `elem` mods = Just ()
 quitEvent _ = Nothing
+
+tabEvent :: Vty.Event -> Maybe ()
+tabEvent (Vty.EvKey (Vty.KChar '\t') []) = Just ()
+tabEvent _ = Nothing
+
+wEvent :: Vty.Event -> Maybe ()
+wEvent (Vty.EvKey (Vty.KChar 'w') []) = Just ()
+wEvent _ = Nothing
+
+bEvent :: Vty.Event -> Maybe ()
+bEvent (Vty.EvKey (Vty.KChar 'b') []) = Just ()
+bEvent _ = Nothing
+
+shiftTabEvent :: Vty.Event -> Maybe ()
+shiftTabEvent (Vty.EvKey Vty.KBackTab []) = Just ()
+shiftTabEvent _ = Nothing
 
 updateEvent :: Vty.Event -> Maybe ()
 updateEvent (Vty.EvKey Vty.KEnter []) = Just ()

@@ -17,7 +17,8 @@ cabal-version:       >=1.10
 
 executable phil2-editor
   main-is:             Main.hs
-  -- other-modules:       
+  other-modules:       TokenTree
+                     , Data.Maybe.Util
   -- other-extensions:    
   build-depends:       base >=4.9 && <4.10
                      , reflex
@@ -27,5 +28,6 @@ executable phil2-editor
                      , vty
                      , phil2
   hs-source-dirs:      src
-  ghc-options:         -threaded
+  ghc-options:         -threaded -Wall -Wincomplete-record-updates
+                       -Wunused-imports -Werror
   default-language:    Haskell2010
