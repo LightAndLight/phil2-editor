@@ -1,14 +1,16 @@
 {-# language RecursiveDo #-}
 {-# language OverloadedStrings #-}
 {-# language OverloadedLists #-}
+{-# language MonadComprehensions #-}
 module Main where
 
 import Brick (Widget)
 import Brick.ReflexMain (brickWrapper)
-import Control.Applicative ((<|>))
+import Data.Foldable (asum)
+import Data.Functor (($>))
 import Reflex
   (Reflex, MonadHold, Dynamic, runSpiderHost,
-   fmapMaybe, attachWithMaybe, current)
+   fmapMaybe, ffilter, attachWithMaybe, current)
 import Reflex.Dynamic (holdDyn)
 import Reflex.Host.App (hostApp, performPostBuild_, infoQuit)
 import System.Environment (getArgs)
@@ -76,22 +78,26 @@ main = do
     Right ast ->
       runSpiderHost . hostApp $ mdo
         let
-          eDoShutdown = fmapMaybe (quitEvent =<<) eInput
+          eBrickEvent = fmapMaybe id eInput
+          eDoShutdown = ffilter quitEvent eBrickEvent $> ()
           dCursor = pure $ const Nothing
           dAttrMap = pure $ Brick.attrMap Vty.defAttr []
+
+          keyEvents :: TokenTreeZ -> Vty.Event -> [Maybe TokenTreeZ]
+          keyEvents a b =
+            [ [ e | e <- nextEditable a, tabEvent b ]
+            , [ e | e <- prevEditable a, shiftTabEvent b ]
+            , [ e | e <- nextLeaf a, wEvent b ]
+            , [ e | e <- prevLeaf a, bEvent b ]
+            ]
 
         dAst <-
           holdDyn
             (zipTokenTree $ exprTokens undefined ast)
             (attachWithMaybe
-               (\a b ->
-                  (b >>= tabEvent) *> nextEditable a <|>
-                  (b >>= shiftTabEvent) *> prevEditable a <|>
-                  (b >>= wEvent) *> nextLeaf a <|>
-                  (b >>= bEvent) *> prevLeaf a
-               )
+               (\a b -> asum $ keyEvents a b)
                (current dAst)
-               eInput)
+               eBrickEvent)
         dWidgets <- makeUI dAst
 
         (eInput, eWasShutdown, _) <- brickWrapper eDoShutdown dWidgets dCursor dAttrMap
@@ -116,27 +122,22 @@ makeUI dAst =
       Brick.viewport "testing" Brick.Vertical .
       renderTokenTreeZ
 
-quitEvent :: Vty.Event -> Maybe ()
-quitEvent (Vty.EvKey (Vty.KChar 'q') mods) | Vty.MCtrl `elem` mods = Just ()
-quitEvent _ = Nothing
+quitEvent :: Vty.Event -> Bool
+quitEvent (Vty.EvKey (Vty.KChar 'q') mods) = Vty.MCtrl `elem` mods
+quitEvent _ = False
 
-tabEvent :: Vty.Event -> Maybe ()
-tabEvent (Vty.EvKey (Vty.KChar '\t') []) = Just ()
-tabEvent _ = Nothing
+tabEvent :: Vty.Event -> Bool
+tabEvent (Vty.EvKey (Vty.KChar '\t') []) = True
+tabEvent _ = False
 
-wEvent :: Vty.Event -> Maybe ()
-wEvent (Vty.EvKey (Vty.KChar 'w') []) = Just ()
-wEvent _ = Nothing
+wEvent :: Vty.Event -> Bool
+wEvent (Vty.EvKey (Vty.KChar 'w') []) = True
+wEvent _ = False
 
-bEvent :: Vty.Event -> Maybe ()
-bEvent (Vty.EvKey (Vty.KChar 'b') []) = Just ()
-bEvent _ = Nothing
+bEvent :: Vty.Event -> Bool
+bEvent (Vty.EvKey (Vty.KChar 'b') []) = True
+bEvent _ = False
 
-shiftTabEvent :: Vty.Event -> Maybe ()
-shiftTabEvent (Vty.EvKey Vty.KBackTab []) = Just ()
-shiftTabEvent _ = Nothing
-
-updateEvent :: Vty.Event -> Maybe ()
-updateEvent (Vty.EvKey Vty.KEnter []) = Just ()
-updateEvent _ = Nothing
-
+shiftTabEvent :: Vty.Event -> Bool
+shiftTabEvent (Vty.EvKey Vty.KBackTab []) = True
+shiftTabEvent _ = False
