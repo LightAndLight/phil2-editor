@@ -69,6 +69,27 @@ exprTokens tyTokens e =
     nested a@Ann{} = brackets (exprTokens tyTokens a)
     nested a = exprTokens tyTokens a
 
+keybindings :: [(Vty.Event -> Bool, TokenTreeZ -> Maybe TokenTreeZ)]
+keybindings =
+  [ (tabEvent, nextEditable)
+  , (shiftTabEvent, prevEditable)
+  , (wEvent, nextLeaf)
+  , (bEvent, prevLeaf)
+  ]
+  where
+    tabEvent (Vty.EvKey (Vty.KChar '\t') []) = True
+    tabEvent _ = False
+
+    wEvent (Vty.EvKey (Vty.KChar 'w') []) = True
+    wEvent _ = False
+
+    bEvent :: Vty.Event -> Bool
+    bEvent (Vty.EvKey (Vty.KChar 'b') []) = True
+    bEvent _ = False
+
+    shiftTabEvent (Vty.EvKey Vty.KBackTab []) = True
+    shiftTabEvent _ = False
+
 main :: IO ()
 main = do
   file:_ <- getArgs
@@ -83,19 +104,11 @@ main = do
           dCursor = pure $ const Nothing
           dAttrMap = pure $ Brick.attrMap Vty.defAttr []
 
-          keyEvents :: TokenTreeZ -> Vty.Event -> [Maybe TokenTreeZ]
-          keyEvents a b =
-            [ [ e | e <- nextEditable a, tabEvent b ]
-            , [ e | e <- prevEditable a, shiftTabEvent b ]
-            , [ e | e <- nextLeaf a, wEvent b ]
-            , [ e | e <- prevLeaf a, bEvent b ]
-            ]
-
         dAst <-
           holdDyn
             (zipTokenTree $ exprTokens undefined ast)
             (attachWithMaybe
-               (\a b -> asum $ keyEvents a b)
+               (\tree event -> asum $ (\(f, g) -> [ e | e <- g tree, f event]) <$> keybindings)
                (current dAst)
                eBrickEvent)
         dWidgets <- makeUI dAst
@@ -125,19 +138,3 @@ makeUI dAst =
 quitEvent :: Vty.Event -> Bool
 quitEvent (Vty.EvKey (Vty.KChar 'q') mods) = Vty.MCtrl `elem` mods
 quitEvent _ = False
-
-tabEvent :: Vty.Event -> Bool
-tabEvent (Vty.EvKey (Vty.KChar '\t') []) = True
-tabEvent _ = False
-
-wEvent :: Vty.Event -> Bool
-wEvent (Vty.EvKey (Vty.KChar 'w') []) = True
-wEvent _ = False
-
-bEvent :: Vty.Event -> Bool
-bEvent (Vty.EvKey (Vty.KChar 'b') []) = True
-bEvent _ = False
-
-shiftTabEvent :: Vty.Event -> Bool
-shiftTabEvent (Vty.EvKey Vty.KBackTab []) = True
-shiftTabEvent _ = False
