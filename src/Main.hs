@@ -8,6 +8,8 @@ import Brick (Widget)
 import Brick.ReflexMain (brickWrapper)
 import Data.Foldable (asum)
 import Data.Functor (($>))
+import Data.List (intersperse)
+import Data.Semigroup ((<>))
 import Reflex
   (Reflex, MonadHold, Dynamic, runSpiderHost,
    fmapMaybe, ffilter, attachWithMaybe, current)
@@ -18,12 +20,61 @@ import System.Environment (getArgs)
 import qualified Brick as Brick
 import qualified Brick.Widgets.Border as Widget
 import qualified Brick.Widgets.Center as Widget
+import qualified Data.List.NonEmpty as NonEmpty
 import qualified Graphics.Vty as Vty
 
-import Phil.Core (Expr(..))
-import Phil.Parser (parseExpr)
+import Phil.Core (Expr(..), Type(..), TypeScheme(..), Definition(..))
+import Phil.Parser (parseDefinitions)
 
 import TokenTree
+
+brackets :: TokenTree -> TokenTree
+brackets tree =
+  tokenTree [Leaf False $ token "(", tree, Leaf False $ token ")"]
+
+definitionsTokens :: [Definition a] -> TokenTree
+definitionsTokens ds =
+  tokenTree . NonEmpty.fromList $
+  intersperse (Leaf False Newline) (fmap definitionTokens ds)
+
+definitionTokens :: Definition a -> TokenTree
+definitionTokens d =
+  case d of
+    DefTypeSig _ name ts ->
+      tokenTree
+        [ Leaf True $ token name
+        , Leaf False $ token " : "
+        , typeSchemeTokens (Leaf True . token) ts
+        ]
+    DefValue _ name val ->
+      tokenTree
+        [ Leaf True $ token name
+        , Leaf False $ token " = "
+        , exprTokens (typeTokens $ Leaf True . token)val
+        ]
+
+typeSchemeTokens :: (a -> TokenTree) -> TypeScheme ann a -> TokenTree
+typeSchemeTokens varTokens (Forall _ vars ty) =
+  tokenTree . NonEmpty.fromList $
+    [ Leaf False $ token "forall " | not (null vars) ] <>
+    intersperse (Leaf False $ token " ") (fmap varTokens vars) <>
+    [ Leaf False $ token ". " | not (null vars) ] <>
+    [ typeTokens varTokens ty ]
+
+typeTokens :: (a -> TokenTree) -> Type ann a -> TokenTree
+typeTokens varTokens e =
+  case e of
+    TyVar _ a -> varTokens a
+    TyArr _ a b ->
+      tokenTree
+        [ nested a
+        , Leaf False $ token " -> "
+        , typeTokens varTokens b
+        ]
+    TyCtor _ a -> Leaf True $ token a
+  where
+    nested a@TyArr{} = brackets (typeTokens varTokens a)
+    nested a = typeTokens varTokens a
 
 exprTokens :: (ty String -> TokenTree) -> Expr ty a -> TokenTree
 exprTokens tyTokens e =
@@ -63,8 +114,6 @@ exprTokens tyTokens e =
         , tyTokens ty
         ]
   where
-    brackets tree =
-      tokenTree [Leaf False $ token "(", tree, Leaf False $ token ")"]
     nested a@App{} = brackets (exprTokens tyTokens a)
     nested a@Ann{} = brackets (exprTokens tyTokens a)
     nested a = exprTokens tyTokens a
@@ -94,7 +143,7 @@ main :: IO ()
 main = do
   file:_ <- getArgs
   content <- readFile file
-  case parseExpr content of
+  case parseDefinitions content of
     Left err -> putStrLn err
     Right ast ->
       runSpiderHost . hostApp $ mdo
@@ -106,7 +155,7 @@ main = do
 
         dAst <-
           holdDyn
-            (zipTokenTree $ exprTokens undefined ast)
+            (zipTokenTree $ definitionsTokens ast)
             (attachWithMaybe
                (\tree event -> asum $ (\(f, g) -> [ e | e <- g tree, f event]) <$> keybindings)
                (current dAst)

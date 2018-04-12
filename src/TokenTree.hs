@@ -1,23 +1,39 @@
+{-# language LambdaCase #-}
 module TokenTree where
 
 import Control.Applicative ((<|>))
 import Data.List.NonEmpty (NonEmpty(..))
-import Data.Maybe.Util (untilNothing)
+import Data.Maybe.Util (untilNothing, untilJust)
 import Data.Semigroup(Semigroup, (<>))
 
 import Brick (Widget, (<+>))
 import qualified Brick as Brick
 import qualified Graphics.Vty as Vty
+import qualified Data.List.NonEmpty as NonEmpty
 
-data Token = Token !String !Int deriving (Eq, Show, Ord)
+data Token
+  = Token !String !Int
+  | Newline
+  deriving (Eq, Show, Ord)
+
+tokenStr :: Token -> String
+tokenStr (Token s _) = s
+tokenStr Newline = "\n"
 
 instance Semigroup Token where
   Token a b <> Token c d = Token (a <> c) (b + d)
+  Newline <> Token a b = Token ("\n" <> a) (1 + b)
+  Token a b <> Newline = Token (a <> "\n") (b + 1)
+  Newline <> Newline = Token "\n\n" 2
 
 data TokenTree
   = Tree !String !Int (NonEmpty TokenTree)
   | Leaf !Bool Token
   deriving (Eq, Show, Ord)
+
+tokens :: TokenTree -> [Token]
+tokens (Leaf _ t) = [t]
+tokens (Tree _ _ ts) = NonEmpty.toList ts >>= tokens
 
 toToken :: TokenTree -> Token
 toToken (Leaf _ t) = t
@@ -73,10 +89,15 @@ right (TokenTreeZ hist cur rs) =
     rr:rrs -> Just $ TokenTreeZ (WentRight cur : hist) rr rrs
 
 nextToken :: TokenTreeZ -> Maybe TokenTreeZ
-nextToken tz = down tz <|> right tz
+nextToken tz =
+  down tz <|>
+  right tz <|>
+  untilJust up right tz
 
 prevToken :: TokenTreeZ -> Maybe TokenTreeZ
-prevToken tz = left tz <|> up tz
+prevToken tz =
+  (fmap (untilNothing $ fmap (untilNothing right) . down) . left) tz <|>
+  up tz
 
 nextLeaf :: TokenTreeZ -> Maybe TokenTreeZ
 nextLeaf tz = do
@@ -106,20 +127,31 @@ prevEditable tz = do
     Leaf False _ -> prevEditable tz'
     _ -> Just tz'
 
-renderTokenTree :: Ord n => Vty.Attr -> TokenTree -> Widget n
-renderTokenTree a (Leaf _ (Token s _)) = Brick.raw $ Vty.string a s
-renderTokenTree a (Tree s _ _) = Brick.raw $ Vty.string a s
+splitOn :: Eq a => (a -> Bool) -> [a] -> [[a]]
+splitOn p str =
+  let
+    (noC, rest) = span (not . p) str
+  in
+    case rest of
+      [] -> [noC]
+      _ : rest' -> noC : splitOn p rest'
 
-renderTokenTrees :: (Functor f, Foldable f, Ord n) => f TokenTree -> Widget n
-renderTokenTrees = foldr (<+>) Brick.emptyWidget . fmap (renderTokenTree Vty.defAttr)
+renderTokenTree :: Ord n => [(Vty.Attr, Token)] -> [Widget n]
+renderTokenTree ts =
+  foldr1 (<+>) .
+  fmap (\(a, b) -> Brick.raw . Vty.string a $ tokenStr b) <$>
+  splitOn (\case; (_, Newline) -> True; _ -> False) ts
 
-renderHistory :: Ord n => [TokenHistory] -> Widget n -> Widget n
-renderHistory [] w = w
-renderHistory (WentRight tt : hist) w = renderHistory hist (renderTokenTree Vty.defAttr tt <+> w)
-renderHistory (WentDown rs : hist) w = renderHistory hist (w <+> renderTokenTrees rs)
+renderHistory :: Ord n => [TokenHistory] -> [(Vty.Attr, Token)] -> [Widget n]
+renderHistory [] tt = renderTokenTree tt
+renderHistory (WentRight tt : hist) ts = renderHistory hist (fmap ((,) Vty.defAttr) (tokens tt) <> ts)
+renderHistory (WentDown rs : hist) ts = renderHistory hist (ts <> fmap ((,) Vty.defAttr) (rs >>= tokens))
 
 renderTokenTreeZ :: Ord n => TokenTreeZ -> Widget n
 renderTokenTreeZ ttz =
+  Brick.vBox $
   renderHistory (history ttz) $
-    renderTokenTree (Vty.black `Brick.on` Vty.white) (focus ttz) <+>
-    renderTokenTrees (rights ttz)
+    fmap ((,) blackOnWhite) (tokens $ focus ttz) <>
+    fmap ((,) Vty.defAttr) (rights ttz >>= tokens)
+  where
+    blackOnWhite = (Vty.black `Brick.on` Vty.white)

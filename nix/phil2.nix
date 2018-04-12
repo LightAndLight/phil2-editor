@@ -6,8 +6,8 @@ mkDerivation {
   version = "0.1.0.0";
   src = fetchgit {
     url = "https://github.com/lightandlight/phil2";
-    sha256 = "1srf44pcr06sy0qvlip7ifiwmzvni41lxcdz2xdmsmvyxn4bq703";
-    rev = "52ae335b70a88896726b3e096cda6f0083cc1573";
+    sha256 = "1jhf53fkkq3ljha6h350kd929nfixkp74ld25dar2h07vhlavavi";
+    rev = "176674c36e567b21906a059d0a36b7095549331d";
   };
   libraryHaskellDepends = [
     base bytestring containers deriving-compat lens mtl parsers
