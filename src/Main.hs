@@ -120,32 +120,16 @@ exprTokens tyTokens e =
 
 keybindings :: [(Vty.Event -> Bool, TokenTreeZ -> Maybe TokenTreeZ)]
 keybindings =
-  [ (tabEvent, nextEditable)
+  [ (charEvent '\t', nextEditable)
   , (shiftTabEvent, prevEditable)
-  , (wEvent, nextLeaf)
-  , (bEvent, prevLeaf)
-  , (kEvent, upAdjacent)
-  , (jEvent, downAdjacent)
-  , (nEvent, fmap fst . closestNewlineRight)
+  , (charEvent 'w', nextLeaf)
+  , (charEvent 'b', prevLeaf)
+  , (charEvent 'k', upAdjacent)
+  , (charEvent 'j', downAdjacent)
   ]
   where
-    tabEvent (Vty.EvKey (Vty.KChar '\t') []) = True
-    tabEvent _ = False
-
-    wEvent (Vty.EvKey (Vty.KChar 'w') []) = True
-    wEvent _ = False
-
-    kEvent (Vty.EvKey (Vty.KChar 'k') []) = True
-    kEvent _ = False
-
-    jEvent (Vty.EvKey (Vty.KChar 'j') []) = True
-    jEvent _ = False
-
-    nEvent (Vty.EvKey (Vty.KChar 'n') []) = True
-    nEvent _ = False
-
-    bEvent (Vty.EvKey (Vty.KChar 'b') []) = True
-    bEvent _ = False
+    charEvent c (Vty.EvKey (Vty.KChar c') []) = c == c'
+    charEvent _ _ = False
 
     shiftTabEvent (Vty.EvKey Vty.KBackTab []) = True
     shiftTabEvent _ = False
