@@ -27,7 +27,13 @@ executable phil2-editor
                      , bricki-reflex
                      , vty
                      , mtl
+                     , containers
                      , phil2
+                     , contravariant
+                     , invariant
+                     , invariant-extras
+                     , profunctors
+                     , generics-eot
   hs-source-dirs:      src
   ghc-options:         -threaded -Wall -Wincomplete-record-updates
                        -Wunused-imports -Werror

@@ -1,17 +1,33 @@
 {-# language LambdaCase #-}
-module TokenTree where
+module TokenTree
+  ( Token(..), tokenStr, tokenSize
+  , strToken
+  , TokenTree(..), branch
+  , toTokens, toToken
+  , TokenTreeZ(..), TokenHistory(..)
+  , renderTokenTreeZ
+  , zipTokenTree, up, down, left, right
+  , leftN, rightN
+  , upAdjacent, downAdjacent
+  , prevToken, nextToken
+  , prevLeaf, nextLeaf
+  , prevEditable, nextEditable
+  , closestNewlineLeft, closestNewlineRight
+  )
+where
 
 import Control.Applicative ((<|>))
 import Control.Monad.State (runState, modify)
 import Data.Functor (($>))
-import Data.List.NonEmpty (NonEmpty(..))
+import Data.Foldable (toList)
 import Data.Maybe.Util (untilNothing, untilNothingM, untilJust)
-import Data.Semigroup(Semigroup, (<>))
+import Data.Semigroup (Semigroup, (<>))
+import Data.Sequence (Seq, (|>), (<|), ViewL(..), viewl)
 
 import Brick (Widget, (<+>))
-import qualified Brick as Brick
+import qualified Brick
 import qualified Graphics.Vty as Vty
-import qualified Data.List.NonEmpty as NonEmpty
+import qualified Data.Sequence as Seq
 
 data Token
   = Token !String !Int
@@ -32,71 +48,88 @@ instance Semigroup Token where
   Token a b <> Newline = Token (a <> "\n") (b + 1)
   Newline <> Newline = Token "\n\n" 2
 
+instance Monoid Token where
+  mempty = Token "" 0
+  mappend = (<>)
+
 data TokenTree
-  = Tree !String !Int (NonEmpty TokenTree)
+  = Empty
+  | Branch !String (Seq TokenTree)
   | Leaf !Bool Token
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show)
+instance Semigroup TokenTree where
+  Empty <> a = a
+  a <> Empty = a
+  Branch s as <> Branch s' as' = Branch (s <> s') (as <> as')
+  Branch s as <> l@(Leaf _ t) = Branch (s <> tokenStr t) (as |> l)
+  l@(Leaf _ t) <> Branch s as = Branch (tokenStr t <> s) (l <| as)
+  l1@(Leaf _ t) <> l2@(Leaf _ t') =
+    Branch (tokenStr t <> tokenStr t') (Seq.fromList [l1, l2])
+instance Monoid TokenTree where
+  mempty = Empty
+  mappend = (<>)
 
-tokenTreeSize :: TokenTree -> Int
-tokenTreeSize (Tree _ n _) = n
-tokenTreeSize (Leaf _ t) = tokenSize t
-
-tokens :: TokenTree -> [Token]
-tokens (Leaf _ t) = [t]
-tokens (Tree _ _ ts) = NonEmpty.toList ts >>= tokens
+branch :: Seq TokenTree -> TokenTree
+branch tts = Branch (foldMap (tokenStr . toToken) tts) tts
 
 toToken :: TokenTree -> Token
+toToken Empty = mempty
+toToken (Branch s _) = strToken s
 toToken (Leaf _ t) = t
-toToken (Tree s off _) = Token s off
 
-tokenTree :: NonEmpty TokenTree -> TokenTree
-tokenTree ts =
-  let
-    Token s off = foldr1 (<>) $ fmap toToken ts
-  in
-    Tree s off ts
+tokenTreeSize :: TokenTree -> Int
+tokenTreeSize = tokenSize . toToken
 
-token :: String -> Token
-token str = Token str $ length str
+toTokens :: TokenTree -> [Token]
+toTokens Empty = []
+toTokens (Leaf _ t) = [t]
+toTokens (Branch _ ts) = toList ts >>= toTokens
+
+strToken :: String -> Token
+strToken str = Token str $ length str
 
 data TokenHistory
-  = WentDown [TokenTree]
+  = WentDown (Seq TokenTree)
   | WentRight TokenTree
-  deriving (Eq, Show, Ord)
+  deriving (Eq, Show)
 
 data TokenTreeZ
   = TokenTreeZ
   { history :: [TokenHistory]
   , focus :: TokenTree
-  , rights :: [TokenTree]
+  , rights :: Seq TokenTree
   } deriving (Eq, Show)
 
 zipTokenTree :: TokenTree -> TokenTreeZ
-zipTokenTree t = TokenTreeZ [] t []
+zipTokenTree t = TokenTreeZ [] t Seq.empty
 
 down :: TokenTreeZ -> Maybe TokenTreeZ
 down (TokenTreeZ hist cur rs) =
   case cur of
+    Empty -> Nothing
     Leaf{} -> Nothing
-    Tree _ _ (tt :| tts) -> Just $ TokenTreeZ (WentDown rs : hist) tt tts
+    Branch _ tts ->
+      case viewl tts of
+        EmptyL -> Nothing
+        tt' :< tts' -> Just $ TokenTreeZ (WentDown rs : hist) tt' tts'
 
 up :: TokenTreeZ -> Maybe TokenTreeZ
 up ttz =
   case untilNothing left ttz of
     TokenTreeZ (WentDown tts : hist) cur rs ->
-      Just $ TokenTreeZ hist (tokenTree $ cur :| rs) tts
+      Just $ TokenTreeZ hist (branch $ cur <| rs) tts
     _ -> Nothing
 
 left :: TokenTreeZ -> Maybe TokenTreeZ
 left (TokenTreeZ (WentRight tt : hist) cur rs) =
-  Just $ TokenTreeZ hist tt (cur:rs)
+  Just $ TokenTreeZ hist tt (cur <| rs)
 left _ = Nothing
 
 right :: TokenTreeZ -> Maybe TokenTreeZ
 right (TokenTreeZ hist cur rs) =
-  case rs of
-    [] -> Nothing
-    rr:rrs -> Just $ TokenTreeZ (WentRight cur : hist) rr rrs
+  case viewl rs of
+    EmptyL -> Nothing
+    rr :< rrs -> Just $ TokenTreeZ (WentRight cur : hist) rr rrs
 
 nextToken :: TokenTreeZ -> Maybe TokenTreeZ
 nextToken tz =
@@ -252,7 +285,7 @@ downAdjacent tz = do
 splitOn :: Eq a => (a -> Bool) -> [a] -> [[a]]
 splitOn p str =
   let
-    (noC, rest) = span (not . p) str
+    (noC, rest) = break p str
   in
     case rest of
       [] -> [noC]
@@ -266,14 +299,15 @@ renderTokenTree ts =
 
 renderHistory :: Ord n => [TokenHistory] -> [(Vty.Attr, Token)] -> [Widget n]
 renderHistory [] tt = renderTokenTree tt
-renderHistory (WentRight tt : hist) ts = renderHistory hist (fmap ((,) Vty.defAttr) (tokens tt) <> ts)
-renderHistory (WentDown rs : hist) ts = renderHistory hist (ts <> fmap ((,) Vty.defAttr) (rs >>= tokens))
+renderHistory (WentRight tt : hist) ts = renderHistory hist (fmap ((,) Vty.defAttr) (toTokens tt) <> ts)
+renderHistory (WentDown rs : hist) ts =
+  renderHistory hist (ts <> fmap ((,) Vty.defAttr) (toList rs >>= toTokens))
 
 renderTokenTreeZ :: Ord n => TokenTreeZ -> Widget n
 renderTokenTreeZ ttz =
   Brick.vBox $
   renderHistory (history ttz) $
-    fmap ((,) blackOnWhite) (tokens $ focus ttz) <>
-    fmap ((,) Vty.defAttr) (rights ttz >>= tokens)
+    fmap ((,) blackOnWhite) (toTokens $ focus ttz) <>
+    fmap ((,) Vty.defAttr) (toList (rights ttz) >>= toTokens)
   where
-    blackOnWhite = (Vty.black `Brick.on` Vty.white)
+    blackOnWhite = Vty.black `Brick.on` Vty.white

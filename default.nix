@@ -9,5 +9,6 @@
     phil2 = self.callPackage ./nix/phil2.nix {};
     unification = self.callPackage ./nix/unification.nix {};
     trifecta = self.trifecta_1_7_1_1;
+    invariant-extras = self.callPackage ./nix/invariant-extras.nix {};
   };
 })
