@@ -2,11 +2,13 @@
 {-# language OverloadedStrings #-}
 {-# language OverloadedLists #-}
 {-# language MonadComprehensions #-}
+{-# language ViewPatterns #-}
 module Main where
 
 import Brick (Widget)
 import Brick.ReflexMain (brickWrapper)
-import Data.Foldable (asum)
+import Control.Applicative ((<|>))
+import Data.Foldable (asum, toList)
 import Data.Functor (($>))
 import Data.List (intersperse)
 import Data.Semigroup ((<>))
@@ -16,8 +18,9 @@ import Reflex
 import Reflex.Dynamic (holdDyn)
 import Reflex.Host.App (hostApp, performPostBuild_, infoQuit)
 import System.Environment (getArgs)
+import Text.Read (readMaybe)
 
-import qualified Brick as Brick
+import qualified Brick
 import qualified Brick.Widgets.Border as Widget
 import qualified Brick.Widgets.Center as Widget
 import qualified Data.List.NonEmpty as NonEmpty
@@ -89,7 +92,7 @@ exprTokens tyTokens e =
         , exprTokens tyTokens body
         ]
     App _ f x ->
-      tokenTree $
+      tokenTree
         [ exprTokens tyTokens f
         , Leaf False $ token " "
         , nested x
@@ -117,6 +120,60 @@ exprTokens tyTokens e =
     nested a@App{} = brackets (exprTokens tyTokens a)
     nested a@Ann{} = brackets (exprTokens tyTokens a)
     nested a = exprTokens tyTokens a
+
+tokensType :: (TokenTree -> Maybe a) -> TokenTree -> Maybe (Type ann a)
+tokensType tokensVar e = _
+
+tokensExpr :: (TokenTree -> Maybe (ty String)) -> TokenTree -> Maybe (Expr ty a)
+tokensExpr tokensTy e =
+  case e of
+    Leaf True (tokenStr -> "??") -> Just $ Hole Nothing
+    Leaf True (tokenStr -> tok) ->
+      Int Nothing <$> readMaybe tok <|>
+      String Nothing <$> readMaybe tok <|>
+      Just (Var Nothing tok)
+    Tree _ _
+      (toList ->
+       [ Leaf False (tokenStr -> "\\")
+       , Leaf True (tokenStr -> n)
+       , Leaf False (tokenStr -> " -> ")
+       , body
+       ])
+      -> Abs Nothing n <$> tokensExpr tokensTy body
+    Tree _ _
+      (toList ->
+       [ f
+       , Leaf False (tokenStr -> " ")
+       , x
+       ])
+      -> App Nothing <$> tokensExpr tokensTy f <*> tokensExpr tokensTy x
+    Tree _ _
+      (toList ->
+       [ Leaf False (tokenStr -> "'")
+       , x
+       ])
+      -> Quote Nothing <$> tokensExpr tokensTy x
+    Tree _ _
+      (toList ->
+       [ Leaf False (tokenStr -> "$")
+       , x
+       ])
+      -> Unquote Nothing <$> tokensExpr tokensTy x
+    Tree _ _
+      (toList ->
+       [ a
+       , Leaf False (tokenStr -> " : ")
+       , ty
+       ])
+      -> Ann Nothing <$> tokensExpr tokensTy a <*> tokensTy ty
+    Tree _ _
+      (toList ->
+       [ Leaf False (tokenStr -> "(")
+       , tree
+       , Leaf False (tokenStr -> ")")
+       ])
+      -> tokensExpr tokensTy tree
+    _ -> Nothing
 
 keybindings :: [(Vty.Event -> Bool, TokenTreeZ -> Maybe TokenTreeZ)]
 keybindings =
