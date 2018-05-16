@@ -8,6 +8,7 @@ module Main where
 import Brick (Widget)
 import Brick.ReflexMain (brickWrapper)
 import Control.Applicative ((<|>))
+import Data.Char (isUpper)
 import Data.Foldable (asum, toList)
 import Data.Functor (($>))
 import Data.List (intersperse)
@@ -47,37 +48,37 @@ definitionTokens d =
       tokenTree
         [ Leaf True $ token name
         , Leaf False $ token " : "
-        , typeSchemeTokens (Leaf True . token) ts
+        , typeSchemeTokens ts
         ]
     DefValue _ name val ->
       tokenTree
         [ Leaf True $ token name
         , Leaf False $ token " = "
-        , exprTokens (typeTokens $ Leaf True . token)val
+        , exprTokens typeTokens val
         ]
 
-typeSchemeTokens :: (a -> TokenTree) -> TypeScheme ann a -> TokenTree
-typeSchemeTokens varTokens (Forall _ vars ty) =
+typeSchemeTokens :: TypeScheme ann String -> TokenTree
+typeSchemeTokens (Forall _ vars ty) =
   tokenTree . NonEmpty.fromList $
     [ Leaf False $ token "forall " | not (null vars) ] <>
-    intersperse (Leaf False $ token " ") (fmap varTokens vars) <>
+    intersperse (Leaf False $ token " ") (fmap (Leaf True . token) vars) <>
     [ Leaf False $ token ". " | not (null vars) ] <>
-    [ typeTokens varTokens ty ]
+    [ typeTokens ty ]
 
-typeTokens :: (a -> TokenTree) -> Type ann a -> TokenTree
-typeTokens varTokens e =
+typeTokens :: Type ann String -> TokenTree
+typeTokens e =
   case e of
-    TyVar _ a -> varTokens a
+    TyVar _ a -> Leaf True $ token a
     TyArr _ a b ->
       tokenTree
         [ nested a
         , Leaf False $ token " -> "
-        , typeTokens varTokens b
+        , typeTokens b
         ]
     TyCtor _ a -> Leaf True $ token a
   where
-    nested a@TyArr{} = brackets (typeTokens varTokens a)
-    nested a = typeTokens varTokens a
+    nested a@TyArr{} = brackets (typeTokens a)
+    nested a = typeTokens a
 
 exprTokens :: (ty String -> TokenTree) -> Expr ty a -> TokenTree
 exprTokens tyTokens e =
@@ -121,11 +122,24 @@ exprTokens tyTokens e =
     nested a@Ann{} = brackets (exprTokens tyTokens a)
     nested a = exprTokens tyTokens a
 
-tokensType :: (TokenTree -> Maybe a) -> TokenTree -> Maybe (Type ann a)
-tokensType tokensVar e = _
+tokensType :: TokenTree -> Maybe (Type ann String)
+tokensType e =
+  case e of
+    Leaf True (tokenStr -> tok) ->
+      if isUpper (head tok)
+      then Just $ TyCtor Nothing tok
+      else Just $ TyVar Nothing tok
+    Tree _ _
+      (toList ->
+       [ a
+       , Leaf False (tokenStr -> " -> ")
+       , b
+       ])
+      -> TyArr Nothing <$> tokensType a <*> tokensType b
+    _ -> Nothing
 
-tokensExpr :: (TokenTree -> Maybe (ty String)) -> TokenTree -> Maybe (Expr ty a)
-tokensExpr tokensTy e =
+tokensExpr :: TokenTree -> Maybe (Expr (Type ann) a)
+tokensExpr e =
   case e of
     Leaf True (tokenStr -> "??") -> Just $ Hole Nothing
     Leaf True (tokenStr -> tok) ->
@@ -139,40 +153,40 @@ tokensExpr tokensTy e =
        , Leaf False (tokenStr -> " -> ")
        , body
        ])
-      -> Abs Nothing n <$> tokensExpr tokensTy body
+      -> Abs Nothing n <$> tokensExpr body
     Tree _ _
       (toList ->
        [ f
        , Leaf False (tokenStr -> " ")
        , x
        ])
-      -> App Nothing <$> tokensExpr tokensTy f <*> tokensExpr tokensTy x
+      -> App Nothing <$> tokensExpr f <*> tokensExpr x
     Tree _ _
       (toList ->
        [ Leaf False (tokenStr -> "'")
        , x
        ])
-      -> Quote Nothing <$> tokensExpr tokensTy x
+      -> Quote Nothing <$> tokensExpr x
     Tree _ _
       (toList ->
        [ Leaf False (tokenStr -> "$")
        , x
        ])
-      -> Unquote Nothing <$> tokensExpr tokensTy x
+      -> Unquote Nothing <$> tokensExpr x
     Tree _ _
       (toList ->
        [ a
        , Leaf False (tokenStr -> " : ")
        , ty
        ])
-      -> Ann Nothing <$> tokensExpr tokensTy a <*> tokensTy ty
+      -> Ann Nothing <$> tokensExpr a <*> tokensType ty
     Tree _ _
       (toList ->
        [ Leaf False (tokenStr -> "(")
        , tree
        , Leaf False (tokenStr -> ")")
        ])
-      -> tokensExpr tokensTy tree
+      -> tokensExpr tree
     _ -> Nothing
 
 keybindings :: [(Vty.Event -> Bool, TokenTreeZ -> Maybe TokenTreeZ)]

@@ -266,8 +266,10 @@ renderTokenTree ts =
 
 renderHistory :: Ord n => [TokenHistory] -> [(Vty.Attr, Token)] -> [Widget n]
 renderHistory [] tt = renderTokenTree tt
-renderHistory (WentRight tt : hist) ts = renderHistory hist (fmap ((,) Vty.defAttr) (tokens tt) <> ts)
-renderHistory (WentDown rs : hist) ts = renderHistory hist (ts <> fmap ((,) Vty.defAttr) (rs >>= tokens))
+renderHistory (WentRight tt : hist) ts =
+  renderHistory hist (fmap ((,) Vty.defAttr) (tokens tt) <> ts)
+renderHistory (WentDown rs : hist) ts =
+  renderHistory hist (ts <> fmap ((,) Vty.defAttr) (rs >>= tokens))
 
 renderTokenTreeZ :: Ord n => TokenTreeZ -> Widget n
 renderTokenTreeZ ttz =
