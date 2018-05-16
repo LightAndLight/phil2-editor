@@ -115,6 +115,23 @@ readShow editable =
          _ -> Nothing)
     (ToTokens . Op $ Leaf editable . strToken . show)
 
+test :: Syntax (Expr (Type ()) ())
+test = atom
+  where
+    atom =
+      eotSum $
+      -- Var Nothing str
+      (munit Nothing >>*<< string True >>*<< munit ()) >>|<<
+      plug >>|<<
+      plug >>|<<
+      plug >>|<<
+      (munit Nothing >>*<< keyword "'" *<< atom >>*<< munit ()) >>|<<
+      plug >>|<<
+      plug >>|<<
+      plug >>|<<
+      plug >>|<<
+      plug
+
 syntaxExpr :: Syntax (ty String) -> Syntax (Expr ty a)
 syntaxExpr sTy = atom
   where
@@ -149,36 +166,6 @@ syntaxExpr sTy = atom
 
       -- done
       plug
-{-
-  -- Abs Nothing str expr
-  (munit Nothing >>*<<
-   keyword "\\" *<< string True >>*<< keyword " -> " *<<
-   syntaxExpr sTy >>*<< munit ()) >>|<<
-
-  -- App Nothing expr expr
-  (munit Nothing >>*<< syntaxExpr sTy >>*<< syntaxExpr sTy >>*<< munit ()) >>|<<
-
-  -- Hole Nothing
-  (munit Nothing >>*<< keyword "??" *<< munit ()) >>|<<
-
-  -- Quote Nothing expr
-  (munit Nothing >>*<< keyword "'" *<< syntaxExpr sTy >>*<< munit ()) >>|<<
-
-  -- String Nothing string
-  (munit Nothing >>*<< keyword "\"" *<< string True >>*<< keyword "\"" *<< munit ()) >>|<<
-
-  -- Unquote Nothing expr
-  (munit Nothing >>*<< keyword "$" *<< syntaxExpr sTy >>*<< munit ()) >>|<<
-
-  -- Ann Nothing expr ty
-  (munit Nothing >>*<< syntaxExpr sTy >>*<< keyword " : " *<< sTy >>*<< munit ()) >>|<<
-
-  -- Int Nothing int
-  (munit Nothing >>*<< readShow True >>*<< munit ()) >>|<<
-
-  -- done
-  plug
-  -}
 
 typeSchemeTokens :: (a -> TokenTree) -> TypeScheme ann a -> TokenTree
 typeSchemeTokens varTokens (Forall _ vars ty) =
